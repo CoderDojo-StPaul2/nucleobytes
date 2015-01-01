@@ -85,6 +85,7 @@ def convert_char_bitarray(char_bitArray):
 def main(argv):
     inputfile = ''
     outputfile = ''
+    print "Reading input and output files..."
     #set up and parse command line arguments. Handle errors if not provided properly
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("input")
@@ -93,8 +94,6 @@ def main(argv):
     args.input
     inputfile = args.input
     outputfile = args.output
-    print "Input File: ",inputfile
-    print "Output File: ",outputfile
 
     #open file descriptors of inptu and output files
     input_file_object = open(inputfile, 'r')
@@ -102,8 +101,10 @@ def main(argv):
     #convert input file to a string and then split into a list of characters
     input_text = input_file_object.read()
     input_list = list(input_text)
-    print input_list
+    print "Input File: ",inputfile
+    print "Output File: ",outputfile
 
+    print "Converting to Hamming Code..."
     #define an array of positions for parity bits
     parity_positions = []
     parity_bit = 1
@@ -116,15 +117,15 @@ def main(argv):
     #for every character in the input list, make a bit array for it encoded with the hamming code
     for character in input_list:
         char_hammingArray = set_hammingArray(character, parity_positions)
-        print char_hammingArray
         seq_out += convert_char_bitarray(char_hammingArray)
         #every 80 characters, add a new line to adhere to recommended FASTA format
         if num_chars%10==0:
             seq_out+='\n'
         num_chars+=1
-    print seq_out
+    print "Writing output..."
     output_file_object.write('>Hamming Code Output: '+outputfile+', Characters Encoded: '+str(num_chars)+'\n')
     output_file_object.write(seq_out)
+    print "Successfully converted"
 
 if __name__ == "__main__":
     main(sys.argv[1:])
