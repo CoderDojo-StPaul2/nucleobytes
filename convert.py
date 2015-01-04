@@ -310,13 +310,20 @@ def percent_tab(total_num):
 		print_percentage((float(total_chars.value)/float(total_num))*100)
 		time.sleep(0.1)
 
-def write_output(output_array, num_workers, output_file_object):
+def write_output(output_array, num_workers, output_file_object, max_line):
 	ordered_results = [None]*num_workers
 	for output in output_array:
 		ordered_results[output[1]] = output[0]
 
-	for output in ordered_results:
-		output_file_object.write(output)
+	if not max_line:
+		for output in ordered_results:
+			output_file_object.write(output)
+	else:
+		total_text = ''
+		for output in ordered_results:
+			total_text += output
+		total_text = '\n'.join(total_text[i:i+max_line] for i in range(0, len(total_text), max_line))
+		output_file_object.write(total_text)
 
 def main(argv):
 	inputfile = ''
@@ -344,8 +351,6 @@ def main(argv):
 	if num_workers == 0:
 		print "convert.py: error: number of workers cannot be 0. Default is 1"
 		sys.exit(2)
-	if inputfile == outputfile:
-		outputfile = "out_1.txt"
 
 	#open file descriptors of inptut and output files
 	input_file_object = open(inputfile, 'r')
@@ -389,7 +394,7 @@ def main(argv):
 		perc_proc.terminate()
 		output_file_object.write('>Hamming Code Output: '+outputfile+', Characters Encoded: '+str(len(input_text))+'\n')
 		#order the output and write to output file
-		write_output(output_segs, num_workers, output_file_object)
+		write_output(output_segs, num_workers, output_file_object, 80)
 
 		print "\nSuccessfully converted"
 	elif args.decode:
@@ -423,7 +428,7 @@ def main(argv):
 		#when we get this far, terminate the percent tallying processes
 		perc_proc.terminate()
 		#order the output and write to output file
-		write_output(output_segs, num_workers, output_file_object)
+		write_output(output_segs, num_workers, output_file_object, False)
 
 		print "\nSuccessfully decoded"
 	else:
