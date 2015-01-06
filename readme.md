@@ -23,17 +23,22 @@ The program makes use of the Python multiprocessing library.
 ###Usage
 `convert.py` takes several command line arguments:
 
-	usage: convert.py [-h] [--decode] [--encode] [--workers W] input [output]
+	usage: convert.py [-h] [--decode] [--encode] [--corrupt] [--workers W]
+                  [--error_rate R]
+                  input [output]
 
 	positional arguments:
-		input
-		output
-		
+	  input
+	  output
+	
 	optional arguments:
-		-h, --help         show this help message and exit
-		--decode, -d       decode boolean flag
-		--encode, -e       encode boolean flag
-		--workers W, -w W  number of processes to spawn
+	  -h, --help            show this help message and exit
+	  --decode, -d          decode boolean flag
+	  --encode, -e          encode boolean flag
+	  --corrupt, -c         data corruption flag
+	  --workers W, -w W     number of processes to spawn
+	  --error_rate R, -r R  define error rate as 1 error per r characters (bigger
+	                       values for smaller error rates)
 		
 **Only two arguments are required:**
 
@@ -41,6 +46,7 @@ The program makes use of the Python multiprocessing library.
 
 * `--encode, -e`: Convert a text file into DNA, in FASTA format, encoded with (13,8) Hamming Code
 * `--decode, -d`: Convert a FASTA file of 13 bit aligned DNA (same format as output of --encode) back to its original format.
+* '--corrupt, -c': Corrupt a FASTA file at a desired rate to simulate mutation over time.
 
 *Specify input file*
 
@@ -50,6 +56,7 @@ The program makes use of the Python multiprocessing library.
 
 * `-h, --help` : Get usage documentation
 * `-w W` : Specify the number of processes (workers) to spawn to make use of multiple cores. Default is 1.
+* '-r R' : For corruption mode, specify the desired error rate for random mutation. An integer value is specified for 1 mutation per R bases (1/R). Default value is 1000 or one error per 1000 bases of DNA.
 * output file: The second non-flag positional argument is the output destination. Default is `out.txt`.
 
 ###Dependencies
