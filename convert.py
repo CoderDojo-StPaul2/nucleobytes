@@ -3,6 +3,7 @@ from bitstring import BitStream, BitArray, Bits
 from bitarray import bitarray
 import sys, argparse, binascii, math, time
 import multiprocessing as mp
+import random
 
 #define the length in bits of a character
 char_length = 8
@@ -149,6 +150,7 @@ def validate_parity(char_bitarray):
 	#if the total checksum isn't even, then the final parity bit is invalidated
 	if(checksum%2!=0):
 		valid = False
+		invalid_parity_bits.append(len(char_bitarray)-1)
 	return (valid, invalid_parity_bits)
 
 '''
@@ -207,12 +209,39 @@ INPUT:
 OUTPUT: corrected bit array
 '''
 def fix_hamming_chunk(char_bitarray, invalid_bits):
-	sum_indexes = sum(invalid_bits)
+	#check if the final check bit is included. If it is, store it and remove it
 
-	if(char_bitarray[sum_indexes] == 1):
-		char_bitarray[sum_indexes] = 0
-	else:
-		char_bitarray[sum_indexes] = 1
+	final_parity = None
+	if len(char_bitarray)-1 in invalid_bits:
+		final_parity = len(char_bitarray)-1
+		invalid_bits.remove(final_parity)
+
+	if len(invalid_bits) != 0:
+		#sum the indexes that aren't the final check bit
+		sum_indexes = -1
+		for index in invalid_bits:
+			#account for 0 base indexing
+			sum_indexes += index+1
+
+
+		#if the sum exceeds the length, this is a double error, so return the array unchanged to flag a double-error
+
+		if sum_indexes > len(char_bitarray)-1:
+			return char_bitarray
+
+		if(char_bitarray[sum_indexes] == 1):
+			char_bitarray[sum_indexes] = 0
+		else:
+			char_bitarray[sum_indexes] = 1
+
+	if final_parity is not None:
+		checksum = sum(char_bitarray[:-1])
+		#if the checksum is even
+		if checksum%2==0:
+			char_bitarray[-1] = 0
+		else:
+			char_bitarray[-1] = 1
+
 	return char_bitarray
 
 '''
@@ -271,38 +300,40 @@ def encode_worker(input_text, index):
 		char_string = convert_char_bitarray(char_hammingArray)
 
 		seq_out += char_string
+		#this is not thread safe but it's only being used for the percentage counter
 		total_chars.value+=1
 	return (seq_out, index)
 
 def decode_worker(chunks, index):
 	decoded_chunks = ''
-
+	num_single_fixes = 0
+	num_double_fixes = 0
 	for chunk in chunks:
 		dna_bitarray = dna_to_bitarray(chunk)
 		valid_tuple = check_char(chunk)
 		valid = valid_tuple[0]
 		if not valid:
-			print "Corrupted data: ",dna_bitarray
 			valid_hamming_array = fix_hamming_chunk(dna_bitarray, valid_tuple[1])
 			parity_validation = validate_parity(valid_hamming_array)
 			output_char = ''
 			if not parity_validation[0]:
-				print chunk
-				print "Double error dectected, omitting character (?) at output index: ",num_chunks
 				output_char = '?'
+
+				num_double_fixes += 1
 			else:
-				print "Corrected to:   ",valid_hamming_array
 				valid_char_array = extract_valid_char(valid_hamming_array)
 				ascii_int = int(valid_char_array.bin, 2)
 				output_char = str(unichr(ascii_int))
 
+				num_single_fixes += 1
 			decoded_chunks += output_char
 		else:
 			valid_char_array = extract_valid_char(dna_bitarray)
 			ascii_int = int(valid_char_array.bin, 2)
 			decoded_chunks += str(unichr(ascii_int))
+		#this is not thread safe but it's only being used for the percentage counter
 		total_chars.value+=1
-	return (decoded_chunks, index)
+	return (decoded_chunks, index, (num_single_fixes, num_double_fixes))
 
 
 def percent_tab(total_num):
@@ -310,6 +341,18 @@ def percent_tab(total_num):
 		print_percentage((float(total_chars.value)/float(total_num))*100)
 		time.sleep(0.1)
 
+'''
+INPUT:
+	output_array [(content_block, indice),...]: Array containing content to be written, broken into blocks contained in
+	tuples, paired with their intended index
+	num_workers: the number of workers that prepared the output_array (should match the length of output_array)
+	output_file_object: file handle to write to
+	max_line: Either an integer, or None. If None, ignore. If integer, place newline every n characters
+OUTPUT:
+	None. Writes contents to output_file_object
+
+
+'''
 def write_output(output_array, num_workers, output_file_object, max_line):
 	ordered_results = [None]*num_workers
 	for output in output_array:
@@ -325,6 +368,21 @@ def write_output(output_array, num_workers, output_file_object, max_line):
 		total_text = '\n'.join(total_text[i:i+max_line] for i in range(0, len(total_text), max_line))
 		output_file_object.write(total_text)
 
+'''
+INPUT:
+	base: a random nucleotide
+OUTPUT: A randomly selected nucleotide NOT equal to input
+'''
+def mutate(base):
+	bases = ["A", "T", "C", "G"]
+	if base not in bases:
+		print "Base '"+base+"' not a valid base."
+		return None
+	mutation = random.sample(bases,1)[0]
+	while mutation == base:
+		mutation = random.sample(bases,1)[0]
+	return mutation
+
 def main(argv):
 	inputfile = ''
 	outputfile = ''
@@ -334,15 +392,17 @@ def main(argv):
 	parser.add_argument("output", nargs='?', default='out.txt')
 	parser.add_argument('--decode', '-d', action='store_true', help='decode boolean flag')
 	parser.add_argument('--encode', '-e', action='store_true', help='encode boolean flag')
+	parser.add_argument('--corrupt', '-c', action='store_true', help='data corruption flag')
 	parser.add_argument('--workers','-w', action="store", dest="w", type=int, help='number of processes to spawn', default='1')
+	parser.add_argument('--error_rate','-r', action="store", dest="r", type=int, help='define error rate as 1 error per r characters (bigger values for smaller error rates)', default='1000')
 	args = parser.parse_args()
-	if((not args.decode) and (not args.encode)):
-		print "usage: convert.py [-h] [--decode] [--encode] input [output]"
-		print "convert.py: error: must specify --decode or --encode flag"
+	if((not args.decode) and (not args.encode) and (not args.corrupt)):
+		print "usage: convert.py [-h] [--decode] [--encode] [--corrupt] input [output]"
+		print "convert.py: error: must specify --decode, --encode or --corrupt flag"
 		sys.exit(2)
-	if(args.decode and args.encode):
+	if((args.decode and args.encode) or (args.corrupt and args.encode) or (args.corrupt and args.decode)):
 		print "usage: convert.py [-h] [--decode] [--encode] input [output]"
-		print "convert.py: error: must specify either --decode or --encode flag, not both"
+		print "convert.py: error: must specify either --decode, --encode or --corrupt flag, not multiple"
 		sys.exit(2)
 	print "Reading input and output files..."
 	inputfile = args.input
@@ -397,10 +457,8 @@ def main(argv):
 		write_output(output_segs, num_workers, output_file_object, 80)
 
 		print "\nSuccessfully converted"
-	elif args.decode:
+	elif args.decode or args.corrupt:
 		print "Parsing FASTA file format"
-		#should be 12
-		step = char_length+len(parity_positions)
 
 		header = input_text.split('\n', 1)[0]
 		if header[0] != ">":
@@ -411,26 +469,68 @@ def main(argv):
 		#get the content after the header line and remove all instances of new lines
 		dna = input_text.split('\n', 1)[1]
 		dna = dna.replace("\n", "")
-		chunks = [dna[i:i+step] for i in range(0, len(dna), step)]
+		if args.decode:
+			print "Decoding from Hamming Channel Code..."
+			step = char_length+len(parity_positions)
+			chunks = [dna[i:i+step] for i in range(0, len(dna), step)]
 
-		print "Decoding from Hamming Channel Code..."
+			input_len = int(math.ceil(float(len(chunks))/float(num_workers)))
+			for i in range(0,num_workers):
+				worker_input[i] = chunks[i*input_len:(i*input_len+input_len)]
 
-		input_len = int(math.ceil(float(len(chunks))/float(num_workers)))
-		for i in range(0,num_workers):
-			worker_input[i] = chunks[i*input_len:(i*input_len+input_len)]
+			pool = mp.Pool(processes=num_workers)
+			results = [pool.apply_async(decode_worker, args=(worker_input[i],i)) for i in range(0,len(worker_input))]
 
-		pool = mp.Pool(processes=num_workers)
-		results = [pool.apply_async(decode_worker, args=(worker_input[i],i)) for i in range(0,len(worker_input))]
+			perc_proc = mp.Process(target=percent_tab, args=(len(dna)/len(chunks[0]),))
+			perc_proc.start()
+			output_segs = [p.get() for p in results]
 
-		perc_proc = mp.Process(target=percent_tab, args=(len(dna)/12,))
-		perc_proc.start()
-		output_segs = [p.get() for p in results]
-		#when we get this far, terminate the percent tallying processes
-		perc_proc.terminate()
-		#order the output and write to output file
-		write_output(output_segs, num_workers, output_file_object, False)
+			num_singles = 0
+			num_doubles = 0
+			for seg in output_segs:
+				num_singles += seg[2][0]
+				num_doubles += seg[2][1]
 
-		print "\nSuccessfully decoded"
+
+			#when we get this far, terminate the percent tallying processes
+			perc_proc.terminate()
+			#order the output and write to output file
+			write_output(output_segs, num_workers, output_file_object, False)
+
+			print "\nSuccessfully decoded."
+			print str(num_singles)+" single errors detected and fixed."
+			print str(num_doubles)+" double errors detected."
+
+		#if data is to be corrupted
+		else:
+			random.seed()
+			print "Randomly mutating data at rate of 1 error per "+str(args.r)+" bases."
+			#create list of DNA bases
+			base_list = list(dna)
+			rate = 1.0/float(args.r)
+			num_mutations = int(len(base_list)*rate)
+			index_list = []
+			for i in range(0,num_mutations):
+				print_percentage((float(i)/float(num_mutations))*100)
+				index = int(random.random()*len(base_list))
+				index_list.append(index)
+				base_list[index] = mutate(base_list[index])
+
+			index_list = sorted(index_list)
+			#find out how many of the mutations might cause double mutations (no guarantee they're in the same hamming chunk)
+			num_double = 0
+			for i in range(1,len(index_list)-1):
+				if index_list[i]-index_list[i-1] < 13:
+					num_double += 1
+				if index_list[i+1] - index_list[i] < 13:
+					num_double +1
+
+			dna = ''.join(base_list)
+			print "\nWriting output file"
+			output_file_object.write(header+'\n')
+			write_output([(dna,0)], 1, output_file_object, 80)
+			print "Complete: "+str(num_mutations)+" mutations inserted. \n"+str(num_double)+" possible double mutations. \nMinimum index: "+str(index_list[0])+" Maximum index: "+str(index_list[-1])
+
 	else:
 		print "No --encode or --decode flags set"
 		sys.exit(2)
