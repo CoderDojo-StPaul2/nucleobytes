@@ -289,6 +289,22 @@ def print_percentage(percent):
 	sys.stdout.write("\rPercent Complete: %f%%" % percent)
 	sys.stdout.flush()
 
+'''
+INPUT: an integer that was decoded in binary format
+OUTPUT: Boolean indicating if this integer is a valid ascii character
+'''
+def check_ascii(ascii_int):
+	if (ascii_int <= 127) and (ascii_int >= 0):
+		return True
+	return False
+
+'''
+INPUT:
+	input_text: a block of text to be encoded by this worker process
+	index: an integer representing what position this block of text is in the original content
+
+OUTPUT: (encoded seq, index): The input text encoded in nucleotide bases and the input index
+'''
 def encode_worker(input_text, index):
 	input_list = list(input_text)
 	seq_out = ''
@@ -304,6 +320,13 @@ def encode_worker(input_text, index):
 		total_chars.value+=1
 	return (seq_out, index)
 
+'''
+INPUT:
+	chunks: array of text blocks the size of an encoded sequence
+	index: the position in the original input this worker is processing
+
+OUTPUT: (chunks decoded back to ASCII characters, input index, (the number of characters fixed with a single error, a double error))
+'''
 def decode_worker(chunks, index):
 	decoded_chunks = ''
 	num_single_fixes = 0
@@ -312,10 +335,10 @@ def decode_worker(chunks, index):
 		dna_bitarray = dna_to_bitarray(chunk)
 		valid_tuple = check_char(chunk)
 		valid = valid_tuple[0]
+		output_char = ''
 		if not valid:
 			valid_hamming_array = fix_hamming_chunk(dna_bitarray, valid_tuple[1])
 			parity_validation = validate_parity(valid_hamming_array)
-			output_char = ''
 			if not parity_validation[0]:
 				output_char = '?'
 
@@ -323,14 +346,23 @@ def decode_worker(chunks, index):
 			else:
 				valid_char_array = extract_valid_char(valid_hamming_array)
 				ascii_int = int(valid_char_array.bin, 2)
-				output_char = str(unichr(ascii_int))
+				if(check_ascii(ascii_int)):
+					output_char = str(unichr(ascii_int))
+					num_single_fixes += 1
+				else:
+					output_char = '?'
+					num_double_fixes += 1
 
-				num_single_fixes += 1
 			decoded_chunks += output_char
 		else:
 			valid_char_array = extract_valid_char(dna_bitarray)
 			ascii_int = int(valid_char_array.bin, 2)
-			decoded_chunks += str(unichr(ascii_int))
+			if(check_ascii(ascii_int)):
+				output_char = str(unichr(ascii_int))
+			else:
+				output_char = '?'
+				num_double_fixes += 1
+			decoded_chunks += output_char
 		#this is not thread safe but it's only being used for the percentage counter
 		total_chars.value+=1
 	return (decoded_chunks, index, (num_single_fixes, num_double_fixes))
