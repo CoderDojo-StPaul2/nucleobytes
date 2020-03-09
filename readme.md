@@ -1,3 +1,4 @@
+[![Run on Repl.it](https://repl.it/badge/github/CoderDojo-StPaul2/nucleobytes)](https://repl.it/github/CoderDojo-StPaul2/nucleobytes)
 #DNA Data Storage
 ##Channel Coding for Mutation Resistance
 
